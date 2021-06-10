@@ -1,0 +1,4 @@
+# Project exclude paths
+/classify/tiny-imagenet-200/
+/detection/pretrain_model/
+/detection/VOCtrainval_11-May-2012/
