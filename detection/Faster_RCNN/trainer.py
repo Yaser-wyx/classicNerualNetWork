@@ -22,6 +22,7 @@ class FasterRCNNTrainer(nn.Module):
         self.faster_rcnn = faster_rcnn
         self.rpn_sigma = cfg.INIT.RPN_SIGMA
         self.roi_sigma = cfg.INIT.ROI_SIGMA
+        assert optimizer is not None , "optimizer should not be None"
         self.optimizer = optimizer
         # AnchorTargetLayer用于从20000个候选anchor中产生256个anchor进行二分类和位置回归，
         # 也就是为rpn网络产生的预测位置和预测类别提供真正的ground_truth标准
@@ -36,7 +37,7 @@ class FasterRCNNTrainer(nn.Module):
         loss = self.forward(img, bbox, label)
         loss.total_loss.backward()
         self.optimizer.step()
-
+        return loss
 
     def forward(self, images, gt_bboxes, gt_labels):
         _, _, H, W = images.shape

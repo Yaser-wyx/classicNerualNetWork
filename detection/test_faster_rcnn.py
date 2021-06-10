@@ -16,18 +16,22 @@ def setup_seed(seed):
 
 
 if __name__ == '__main__':
-    setup_seed(20)
-
-    root = "D:\\classicNerualNetWork\\detection\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012"
-    seq = iaa.Sequential([
-        iaa.Fliplr(0.5),
-        iaa.Flipud(0.5)
-    ])
-    voc_dataset = VocDataset(root_dir=root, transforms=seq)
-    voc_dataloader = DataLoader(voc_dataset, shuffle=False, batch_size=1)
-    image, bbox_list, label = next(iter(voc_dataloader))
-    print(bbox_list, label)
     vgg_faster_rcnn = VGGFasterRCNN()
-    trainer = FasterRCNNTrainer(vgg_faster_rcnn)
-    losses = trainer(image, bbox_list, label)
-    print(losses)
+
+    optimizer = torch.optim.SGD(vgg_faster_rcnn.parameters(), lr=0.001, momentum=0.5)
+    print(type(optimizer))
+    # setup_seed(20)
+    #
+    # root = "D:\\classicNerualNetWork\\detection\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012"
+    # seq = iaa.Sequential([
+    #     iaa.Fliplr(0.5),
+    #     iaa.Flipud(0.5)
+    # ])
+    # voc_dataset = VocDataset(root_dir=root, transforms=seq)
+    # voc_dataloader = DataLoader(voc_dataset, shuffle=False, batch_size=1)
+    # image, bbox_list, label = next(iter(voc_dataloader))
+    # print(bbox_list, label)
+    # vgg_faster_rcnn = VGGFasterRCNN()
+    # trainer = FasterRCNNTrainer(vgg_faster_rcnn)
+    # losses = trainer(image, bbox_list, label)
+    # print(losses)
