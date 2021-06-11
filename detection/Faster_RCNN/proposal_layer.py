@@ -30,6 +30,7 @@ class ProposalLayer(nn.Module):
         self._anchors = generate_raw_image_anchor(feature_height=feature_height, feature_width=feature_width,
                                                   anchors_template=self._anchors_template,
                                                   feat_stride=self.feat_stride)
+
         rois = []
         rois_idx = []
         h, w = img_size[0], img_size[1]

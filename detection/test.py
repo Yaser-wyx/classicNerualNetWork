@@ -223,3 +223,5 @@ if __name__ == '__main__':
     print(disable_index)
     idx = torch.tensor(array).float()
     print(idx[torch.multinomial(idx, 3)])
+    idx = idx.cuda()
+    print(idx)

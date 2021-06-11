@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 
+from detection.Faster_RCNN.utils.config import cfg
+
 
 def generate_anchor_template(base_size=16, scales=None, ratios=None):
     """
@@ -87,6 +89,9 @@ def generate_raw_image_anchor(feature_height, feature_width, feat_stride, anchor
     anchors = anchors_template.unsqueeze(0)
     anchors = shift_xys + anchors  # 将anchor模板加上偏移量
     anchors = anchors.reshape((anchors.shape[0] * anchors.shape[1], 4))
+    device = cfg.INIT.DEVICE
+    if device == torch.device("cuda"):
+        anchors = anchors.cuda()
     return anchors
 
 
@@ -154,8 +159,9 @@ def cal_offset_scale(pred_bbox, gt_bbox):
     pred_x_ctrs, pred_y_ctrs, pred_ws, pred_hs = _cal_anchor_ctr(pred_bbox)
     # 计算gt_bbox的中心坐标以及高宽
     gt_x_ctrs, gt_y_ctrs, gt_ws, gt_hs = _cal_anchor_ctr(gt_bbox)
+    device = cfg.INIT.DEVICE
 
-    eps = torch.tensor(torch.finfo(torch.float32).eps)
+    eps = torch.tensor(torch.finfo(torch.float32).eps, device=device)
     # Note：pred_ws与pred_hs要用于分母，防止出现0
     pred_ws = torch.maximum(eps, pred_ws)
     pred_hs = torch.maximum(eps, pred_hs)
@@ -169,12 +175,14 @@ def cal_offset_scale(pred_bbox, gt_bbox):
 
 
 def map_data2anchor(data, anchor_idx, anchor_num, default_value):
+    device = cfg.INIT.DEVICE
+
     if len(data.shape) == 1:
-        anchor_data = torch.empty((anchor_num,), dtype=data.dtype)
+        anchor_data = torch.empty((anchor_num,), dtype=data.dtype, device=device)
         anchor_data.fill_(default_value)
         anchor_data[anchor_idx] = data
     else:
-        anchor_data = torch.empty((anchor_num,) + data.shape[1:], dtype=data.dtype)
+        anchor_data = torch.empty((anchor_num,) + data.shape[1:], dtype=data.dtype, device=device)
         anchor_data.fill_(default_value)
         anchor_data[anchor_idx, :] = data
     return anchor_data

@@ -3,16 +3,19 @@ import torch
 import numpy as np
 
 from detection.Faster_RCNN.utils.bbox_tools import cal_IoU, cal_offset_scale, map_data2anchor
+from detection.Faster_RCNN.utils.config import cfg
 
 
 class AnchorTargetLayer(nn.Module):
     # 主要用于训练RPN网络的Anchor生成
     def __init__(self, n_sample=256, pos_iou_thresh=0.7, neg_iou_thresh=0.3, pos_ratio=0.5):
         super().__init__()
-        self.n_sample = torch.tensor(n_sample)
-        self.neg_iou_thresh = torch.tensor(neg_iou_thresh)
-        self.pos_iou_thresh = torch.tensor(pos_iou_thresh)
-        self.pos_ratio = torch.tensor(pos_ratio)
+        device = cfg.INIT.DEVICE
+        self.device = device
+        self.n_sample = torch.tensor(n_sample).to(device)
+        self.neg_iou_thresh = torch.tensor(neg_iou_thresh).to(device)
+        self.pos_iou_thresh = torch.tensor(pos_iou_thresh).to(device)
+        self.pos_ratio = torch.tensor(pos_ratio).to(device)
 
     def forward(self, gt_bbox, anchors, img_size):
         img_h, img_w = img_size
@@ -35,7 +38,7 @@ class AnchorTargetLayer(nn.Module):
 
     def _create_label(self, anchors, gt_bbox):
         # 给符合条件的anchor打上标签，前景为1，后景为0，-1是默认值
-        label = torch.zeros(len(anchors), dtype=torch.int32)
+        label = torch.zeros(len(anchors), dtype=torch.int32,device = self.device)
         label.fill_(-1)  # 全部填充为默认值
         argmax_iou, per_anchor_max_iou, max_iou_anchor_idx = self._cal_iou(anchors, gt_bbox)
         # 填充负样本
@@ -90,13 +93,15 @@ class AnchorTargetLayer(nn.Module):
 class ProposalTargetLayer(nn.Module):
     def __init__(self, n_sample=128, pos_ratio=0.25, pos_iou_thresh=0.5, neg_iou_thresh_hi=0.5, neg_iou_thresh_lo=0.0):
         super().__init__()
-        self.n_sample = torch.tensor(n_sample)
-        self.pos_ratio = torch.tensor(pos_ratio)
-        self.pos_iou_thresh = torch.tensor(pos_iou_thresh)
-        self.neg_iou_thresh_hi = torch.tensor(neg_iou_thresh_hi)
-        self.neg_iou_thresh_lo = torch.tensor(neg_iou_thresh_lo)
+        device = cfg.INIT.DEVICE
+        self.device = device
+        self.n_sample = torch.tensor(n_sample).to(device)
+        self.pos_ratio = torch.tensor(pos_ratio).to(device)
+        self.pos_iou_thresh = torch.tensor(pos_iou_thresh).to(device)
+        self.neg_iou_thresh_hi = torch.tensor(neg_iou_thresh_hi).to(device)
+        self.neg_iou_thresh_lo = torch.tensor(neg_iou_thresh_lo).to(device)
 
-        self.positive_num = torch.round(self.n_sample * self.pos_ratio)  # 正样本个数
+        self.positive_num = torch.round(self.n_sample * self.pos_ratio).to(device)  # 正样本个数
 
     def forward(self, roi, gt_bbox, gt_label, loc_normalize_mean=(0., 0., 0., 0.),
                 loc_normalize_std=(0.1, 0.1, 0.2, 0.2)):
@@ -139,6 +144,7 @@ class ProposalTargetLayer(nn.Module):
         # 计算用于训练的的roi样本与gt_bbox之间的偏移量
         roi_gt_offset_scale = cal_offset_scale(roi_samples, gt_bbox[iou_max_idx[keep_idx]])
         roi_gt_offset_scale = \
-            (roi_gt_offset_scale - torch.tensor(loc_normalize_mean, dtype=torch.float32)) / torch.tensor(
-                loc_normalize_std, dtype=torch.float32)
+            (roi_gt_offset_scale - torch.tensor(loc_normalize_mean, dtype=torch.float32,
+                                                device=self.device)) / torch.tensor(
+                loc_normalize_std, dtype=torch.float32, device=self.device)
         return roi_samples, roi_gt_offset_scale, roi_sample_labels

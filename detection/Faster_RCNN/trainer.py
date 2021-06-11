@@ -17,12 +17,13 @@ LossTuple = namedtuple('LossTuple',
 
 
 class FasterRCNNTrainer(nn.Module):
-    def __init__(self, faster_rcnn, optimizer):
+    def __init__(self, faster_rcnn, optimizer, device):
         super().__init__()
         self.faster_rcnn = faster_rcnn
         self.rpn_sigma = cfg.INIT.RPN_SIGMA
         self.roi_sigma = cfg.INIT.ROI_SIGMA
-        assert optimizer is not None , "optimizer should not be None"
+        self.device = device
+        assert optimizer is not None, "optimizer should not be None"
         self.optimizer = optimizer
         # AnchorTargetLayer用于从20000个候选anchor中产生256个anchor进行二分类和位置回归，
         # 也就是为rpn网络产生的预测位置和预测类别提供真正的ground_truth标准
@@ -56,7 +57,7 @@ class FasterRCNNTrainer(nn.Module):
         roi_samples, roi_gt_bbox, roi_gt_labels = self.proposal_target_layer(rois, gt_bbox, gt_label,
                                                                              self.loc_normalize_mean,
                                                                              self.loc_normalize_std)
-        sample_roi_index = torch.zeros(len(roi_samples))  # TODO REMOVE WHEN SUPPORT FOR BATCH>1
+        sample_roi_index = torch.zeros(len(roi_samples), device=self.device)  # TODO REMOVE WHEN SUPPORT FOR BATCH>1
         # 获取每一个预测roi的类别信息以及回归边界框
         # cls_pred shape: sample_num * (k*2) 是sample_num个样例，每一个样例对应K个类别是前景还是后景的概率
         # bbox_pred shape: sample_num * (k*4) 是sample_num个样例，每一个样例对应K个类别的位置

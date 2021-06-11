@@ -20,6 +20,7 @@ class VGGFasterRCNN(FasterRCNN):
 
         extractor, classifier = init_VGG16(pretrain, pretrain_model_path)
 
+
         rpn = RegionProposalNetWork(in_channels=rpn_in_channel, mid_channels=rpn_mid_channel, anchor_ratios=ratios,
                                     anchor_scales=anchor_scales, feat_stride=feat_stride)
 

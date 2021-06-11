@@ -1,3 +1,4 @@
+import torch
 from easydict import EasyDict as edict
 import numpy as np
 
@@ -16,6 +17,7 @@ __C.INIT.RPN_IN_CHANNEL = 512
 __C.INIT.RPN_MID_CHANNEL = 512
 __C.INIT.FEAT_STRIDE = 16
 __C.INIT.ROI_SIZE = 7
+__C.INIT.DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 __C.TRAIN = edict()
 

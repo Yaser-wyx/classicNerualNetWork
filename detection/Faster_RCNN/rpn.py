@@ -5,6 +5,7 @@ from detection.Faster_RCNN.proposal_layer import ProposalLayer
 from detection.Faster_RCNN.utils.bbox_tools import generate_anchor_template, generate_raw_image_anchor
 import torch.nn.functional as F
 
+from detection.Faster_RCNN.utils.config import cfg
 from detection.Faster_RCNN.utils.model_helper import normal_init
 
 
@@ -22,10 +23,11 @@ class RegionProposalNetWork(nn.Module):
                                 in extractor. In VGG, the value is 16.
         """
         super().__init__()
+        device = cfg.INIT.DEVICE
         if anchor_scales is None:
-            anchor_scales = np.array([8, 16, 32])
+            anchor_scales = torch.tensor([8, 16, 32],device=device)
         if anchor_ratios is None:
-            anchor_ratios = np.array([0.5, 1, 2])
+            anchor_ratios = torch.tensor([0.5, 1, 2],device=device)
         self.feat_stride = feat_stride
         self.proposal_layer = ProposalLayer(feat_stride, anchor_scales, anchor_ratios)
         # generate the anchors template
