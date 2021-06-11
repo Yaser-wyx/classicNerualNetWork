@@ -6,6 +6,8 @@ __C = edict()
 cfg = __C
 
 __C.INIT = edict()
+__C.INIT.DATA_ROOT = "D:\\classicNerualNetWork\\detection\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012"
+__C.INIT.EPOCHS = 10
 __C.INIT.PRETRAIN = True
 __C.INIT.PRETRAIN_MODEL_PATH = None
 __C.INIT.N_CLASSES = 20
@@ -21,7 +23,7 @@ __C.INIT.DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 __C.TRAIN = edict()
 
-__C.TRAIN.LEARNING_RATE = 0.001
+__C.TRAIN.LEARNING_RATE = 0.002
 __C.TRAIN.MOMENTUM = 0.9
 __C.TRAIN.WEIGHT_DECAY = 0.0005
 __C.TRAIN.GAMMA = 0.1

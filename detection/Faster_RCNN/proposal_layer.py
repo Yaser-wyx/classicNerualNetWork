@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torchvision.ops import nms
 
-from detection.Faster_RCNN.utils.bbox_tools import amend_bbox, generate_anchor_template, generate_raw_image_anchor
+from detection.Faster_RCNN.utils._bbox_tools import amend_bbox, generate_anchor_template, generate_raw_image_anchor
 from detection.Faster_RCNN.utils.config import cfg
 
 

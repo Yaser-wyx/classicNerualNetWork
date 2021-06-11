@@ -1,11 +1,16 @@
+from __future__ import absolute_import
+import os
 from collections import namedtuple
+import time
+from torch.nn import functional as F
 
-import torch.nn as nn
-import torch
-import torch.nn.functional as F
+from torch import nn
+import torch as t
+
+from torchnet.meter import ConfusionMeter, AverageValueMeter
+
 from detection.Faster_RCNN.target_layer import AnchorTargetLayer, ProposalTargetLayer
 from detection.Faster_RCNN.utils.config import cfg
-from detection.Faster_RCNN.utils.model_helper import cal_reg_loss
 
 LossTuple = namedtuple('LossTuple',
                        ['rpn_reg_loss',
@@ -17,72 +22,236 @@ LossTuple = namedtuple('LossTuple',
 
 
 class FasterRCNNTrainer(nn.Module):
-    def __init__(self, faster_rcnn, optimizer, device):
-        super().__init__()
+    """wrapper for conveniently training. return losses
+
+    The losses include:
+
+    * :obj:`rpn_loc_loss`: The localization loss for \
+        Region Proposal Network (RPN).
+    * :obj:`rpn_cls_loss`: The classification loss for RPN.
+    * :obj:`roi_loc_loss`: The localization loss for the head module.
+    * :obj:`roi_cls_loss`: The classification loss for the head module.
+    * :obj:`total_loss`: The sum of 4 loss above.
+
+    Args:
+        faster_rcnn (model.FasterRCNN):
+            A Faster R-CNN model that is going to be trained.
+    """
+
+    def __init__(self, faster_rcnn):
+        super(FasterRCNNTrainer, self).__init__()
+
         self.faster_rcnn = faster_rcnn
         self.rpn_sigma = cfg.INIT.RPN_SIGMA
         self.roi_sigma = cfg.INIT.ROI_SIGMA
-        self.device = device
-        assert optimizer is not None, "optimizer should not be None"
-        self.optimizer = optimizer
-        # AnchorTargetLayer用于从20000个候选anchor中产生256个anchor进行二分类和位置回归，
-        # 也就是为rpn网络产生的预测位置和预测类别提供真正的ground_truth标准
-        self.anchor_target_layer = AnchorTargetLayer()  # 服务于RPN部分
-        # ProposalCreator是RPN为Fast R-CNN生成RoIs，在训练和测试阶段都会用到。
-        # 所以测试阶段直接输进来300个RoIs，而训练阶段会有AnchorTargetCreator的再次干预。
-        self.proposal_target_layer = ProposalTargetLayer()  # 服务于RoIHead部分
+
+        # target creator create gt_bbox gt_label etc as training targets. 
+        self.anchor_target_creator = AnchorTargetLayer()
+        self.proposal_target_creator = ProposalTargetLayer()
+
         self.loc_normalize_mean = faster_rcnn.loc_normalize_mean
         self.loc_normalize_std = faster_rcnn.loc_normalize_std
 
-    def step(self, img, bbox, label):
-        loss = self.forward(img, bbox, label)
-        loss.total_loss.backward()
-        self.optimizer.step()
-        return loss
+        self.optimizer = self.faster_rcnn.get_optimizer()
+        # visdom wrapper
+        # self.vis = Visualizer(env=opt.env)
 
-    def forward(self, images, gt_bboxes, gt_labels):
-        _, _, H, W = images.shape
-        image_size = (H, W)
-        # TODO: WHEN SUPPORT FOR BATCH>1, REMOVE IT
-        # now is only support for batch=1
-        gt_bbox = gt_bboxes[0]
-        gt_label = gt_labels[0]
-        # 经过VGG16提取特征
-        features = self.faster_rcnn.extractor(images)
-        # 经过rpn生成roi
-        rois, rois_idx, anchors, offset_scale_pred, rpn_bbox_bf_pred = self.faster_rcnn.rpn(features, image_size)
-        offset_scale_pred = offset_scale_pred[0]
-        rpn_bbox_bf_pred = rpn_bbox_bf_pred[0]
-        # 从roi中提取训练样本
-        roi_samples, roi_gt_bbox, roi_gt_labels = self.proposal_target_layer(rois, gt_bbox, gt_label,
-                                                                             self.loc_normalize_mean,
-                                                                             self.loc_normalize_std)
-        sample_roi_index = torch.zeros(len(roi_samples), device=self.device)  # TODO REMOVE WHEN SUPPORT FOR BATCH>1
-        # 获取每一个预测roi的类别信息以及回归边界框
-        # cls_pred shape: sample_num * (k*2) 是sample_num个样例，每一个样例对应K个类别是前景还是后景的概率
-        # bbox_pred shape: sample_num * (k*4) 是sample_num个样例，每一个样例对应K个类别的位置
-        roi_label_pred, roi_bbox_pred = self.faster_rcnn.head(features, roi_samples, sample_roi_index)
-        # --------------------------RPN LOSSES
-        rpn_offset_scale_gt, rpn_label_gt = self.anchor_target_layer(gt_bbox, anchors, image_size)
-        rpn_label_gt = rpn_label_gt.long()
-        # 计算rpn网络对anchor回归预测的loss
-        print("计算rpn回归损失")
-        rpn_reg_loss = cal_reg_loss(offset_scale_pred, rpn_offset_scale_gt, rpn_label_gt, self.rpn_sigma)
-        # 计算rpn网络对于anchor分类(前景还是后景)预测的loss
-        rpn_cls_loss = F.cross_entropy(rpn_bbox_bf_pred, rpn_label_gt, ignore_index=-1)
-        # --------------------------ROI LOSSES
-        # 计算RoI预测的位置损失
-        sample_num = roi_bbox_pred.shape[0]
-        roi_bbox_pred = roi_bbox_pred.view(sample_num, -1, 4)
-        roi_gt_labels = roi_gt_labels.long()
-        roi_bbox_pred = roi_bbox_pred[torch.arange(0, sample_num).long(), roi_gt_labels]  # 获取每一个预测roi对应真值的坐标
-        print("计算RoI回归损失")
+        # indicators for training status
+        self.rpn_cm = ConfusionMeter(2)
+        self.roi_cm = ConfusionMeter(21)
+        self.meters = {k: AverageValueMeter() for k in LossTuple._fields}  # average loss
 
-        roi_reg_loss = cal_reg_loss(roi_bbox_pred.contiguous(), roi_gt_bbox, roi_gt_labels, self.roi_sigma)
-        # 计算RoI预测的label损失
-        roi_cls_loss = F.cross_entropy(roi_label_pred, roi_gt_labels)
+    def forward(self, imgs, bboxes, labels, scale):
+        """Forward Faster R-CNN and calculate losses.
 
-        losses = [rpn_reg_loss, rpn_cls_loss, roi_reg_loss, roi_cls_loss]
+        Here are notations used.
+
+        * :math:`N` is the batch size.
+        * :math:`R` is the number of bounding boxes per image.
+
+        Currently, only :math:`N=1` is supported.
+
+        Args:
+            imgs (~torch.autograd.Variable): A variable with a batch of images.
+            bboxes (~torch.autograd.Variable): A batch of bounding boxes.
+                Its shape is :math:`(N, R, 4)`.
+            labels (~torch.autograd..Variable): A batch of labels.
+                Its shape is :math:`(N, R)`. The background is excluded from
+                the definition, which means that the range of the value
+                is :math:`[0, L - 1]`. :math:`L` is the number of foreground
+                classes.
+            scale (float): Amount of scaling applied to
+                the raw image during preprocessing.
+
+        Returns:
+            namedtuple of 5 losses
+        """
+        n = bboxes.shape[0]
+        if n != 1:
+            raise ValueError('Currently only batch size 1 is supported.')
+
+        _, _, H, W = imgs.shape
+        img_size = (H, W)
+
+        features = self.faster_rcnn.extractor(imgs)
+
+        rpn_locs, rpn_scores, rois, roi_indices, anchor = \
+            self.faster_rcnn.rpn(features, img_size, scale)
+
+        # Since batch size is one, convert variables to singular form
+        bbox = bboxes[0]
+        label = labels[0]
+        rpn_score = rpn_scores[0]
+        rpn_loc = rpn_locs[0]
+        roi = rois
+
+        # Sample RoIs and forward
+        # it's fine to break the computation graph of rois, 
+        # consider them as constant input
+        sample_roi, gt_roi_loc, gt_roi_label = self.proposal_target_creator(
+            roi,
+            at.tonumpy(bbox),
+            at.tonumpy(label),
+            self.loc_normalize_mean,
+            self.loc_normalize_std)
+        # NOTE it's all zero because now it only support for batch=1 now
+        sample_roi_index = t.zeros(len(sample_roi))
+        roi_cls_loc, roi_score = self.faster_rcnn.head(
+            features,
+            sample_roi,
+            sample_roi_index)
+
+        # ------------------ RPN losses -------------------#
+        gt_rpn_loc, gt_rpn_label = self.anchor_target_creator(
+            at.tonumpy(bbox),
+            anchor,
+            img_size)
+        # todo
+        gt_rpn_label = at.totensor(gt_rpn_label).long()
+        gt_rpn_loc = at.totensor(gt_rpn_loc)
+        rpn_loc_loss = _fast_rcnn_loc_loss(
+            rpn_loc,
+            gt_rpn_loc,
+            gt_rpn_label.data,
+            self.rpn_sigma)
+
+        # NOTE: default value of ignore_index is -100 ...
+        rpn_cls_loss = F.cross_entropy(rpn_score, gt_rpn_label, ignore_index=-1)
+        _gt_rpn_label = gt_rpn_label[gt_rpn_label > -1]
+        _rpn_score = at.tonumpy(rpn_score)[at.tonumpy(gt_rpn_label) > -1]
+        self.rpn_cm.add(at.totensor(_rpn_score, False), _gt_rpn_label.data.long())
+
+        # ------------------ ROI losses (fast rcnn loss) -------------------#
+        n_sample = roi_cls_loc.shape[0]  # 对位置计算损失
+        roi_cls_loc = roi_cls_loc.view(n_sample, -1, 4)
+        roi_loc = roi_cls_loc[t.arange(0, n_sample).long(), at.totensor(gt_roi_label).long()]
+        gt_roi_label = at.totensor(gt_roi_label).long()
+        gt_roi_loc = at.totensor(gt_roi_loc)
+
+        roi_loc_loss = _fast_rcnn_loc_loss(
+            roi_loc.contiguous(),
+            gt_roi_loc,
+            gt_roi_label.data,
+            self.roi_sigma)
+
+        roi_cls_loss = nn.CrossEntropyLoss()(roi_score, gt_roi_label)
+
+        self.roi_cm.add(at.totensor(roi_score, False), gt_roi_label.data.long())
+
+        losses = [rpn_loc_loss, rpn_cls_loss, roi_loc_loss, roi_cls_loss]
         losses = losses + [sum(losses)]
 
         return LossTuple(*losses)
+
+    def train_step(self, imgs, bboxes, labels, scale=1.):
+        self.optimizer.zero_grad()
+        losses = self.forward(imgs, bboxes, labels, scale)
+        losses.total_loss.backward()
+        self.optimizer.step()
+        self.update_meters(losses)
+        return losses
+
+    def save(self, save_optimizer=False, save_path=None, **kwargs):
+        """serialize models include optimizer and other info
+        return path where the model-file is stored.
+
+        Args:
+            save_optimizer (bool): whether save optimizer.state_dict().
+            save_path (string): where to save model, if it's None, save_path
+                is generate using time str and info from kwargs.
+        
+        Returns:
+            save_path(str): the path to save models.
+        """
+        save_dict = dict()
+
+        save_dict['model'] = self.faster_rcnn.state_dict()
+        save_dict['config'] = opt._state_dict()
+        save_dict['other_info'] = kwargs
+        save_dict['vis_info'] = self.vis.state_dict()
+
+        if save_optimizer:
+            save_dict['optimizer'] = self.optimizer.state_dict()
+
+        if save_path is None:
+            timestr = time.strftime('%m%d%H%M')
+            save_path = 'checkpoints/fasterrcnn_%s' % timestr
+            for k_, v_ in kwargs.items():
+                save_path += '_%s' % v_
+
+        save_dir = os.path.dirname(save_path)
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        t.save(save_dict, save_path)
+        self.vis.save([self.vis.env])
+        return save_path
+
+    def load(self, path, load_optimizer=True, parse_opt=False, ):
+        state_dict = t.load(path)
+        if 'model' in state_dict:
+            self.faster_rcnn.load_state_dict(state_dict['model'])
+        else:  # legacy way, for backward compatibility
+            self.faster_rcnn.load_state_dict(state_dict)
+            return self
+        if parse_opt:
+            opt._parse(state_dict['config'])
+        if 'optimizer' in state_dict and load_optimizer:
+            self.optimizer.load_state_dict(state_dict['optimizer'])
+        return self
+
+    def update_meters(self, losses):
+        loss_d = {k: at.scalar(v) for k, v in losses._asdict().items()}
+        for key, meter in self.meters.items():
+            meter.add(loss_d[key])
+
+    def reset_meters(self):
+        for key, meter in self.meters.items():
+            meter.reset()
+        self.roi_cm.reset()
+        self.rpn_cm.reset()
+
+    def get_meter_data(self):
+        return {k: v.value()[0] for k, v in self.meters.items()}
+
+
+def _smooth_l1_loss(x, t, in_weight, sigma):
+    sigma2 = sigma ** 2
+    diff = in_weight * (x - t)
+    abs_diff = diff.abs()
+    flag = (abs_diff.data < (1. / sigma2)).float()
+    y = (flag * (sigma2 / 2.) * (diff ** 2) +
+         (1 - flag) * (abs_diff - 0.5 / sigma2))
+    return y.sum()
+
+
+def _fast_rcnn_loc_loss(pred_loc, gt_loc, gt_label, sigma):
+    in_weight = t.zeros(gt_loc.shape).cuda()
+    # Localization loss is calculated only for positive rois.
+    # NOTE:  unlike origin implementation, 
+    # we don't need inside_weight and outside_weight, they can calculate by gt_label
+    in_weight[(gt_label > 0)] = 1
+    loc_loss = _smooth_l1_loss(pred_loc, gt_loc, in_weight.detach(), sigma)
+    # Normalize by total number of negtive and positive rois.
+    loc_loss /= ((gt_label >= 0).sum().float())  # ignore gt_label==-1 for rpn_loss
+    return loc_loss

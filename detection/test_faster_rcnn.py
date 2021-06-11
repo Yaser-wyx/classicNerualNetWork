@@ -3,7 +3,7 @@ from imgaug import augmenters as iaa
 import torch
 import numpy as np
 import random
-from detection.Faster_RCNN.trainer import FasterRCNNTrainer
+from detection.Faster_RCNN.trainer2 import FasterRCNNTrainer
 from detection.Faster_RCNN.utils.config import cfg
 from detection.Faster_RCNN.vgg_faseter_rcnn import VGGFasterRCNN
 from detection.dataset.voc_dataset import VocDataset

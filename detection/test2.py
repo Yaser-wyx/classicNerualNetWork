@@ -7,7 +7,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from imgaug import augmenters as iaa
 
-from detection.Faster_RCNN.utils.bbox_tools import generate_anchor_template
+from detection.Faster_RCNN.utils._bbox_tools import generate_anchor_template
 from detection.dataset.voc_dataset import VocDataset
 
 

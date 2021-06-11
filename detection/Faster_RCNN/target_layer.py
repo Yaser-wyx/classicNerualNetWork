@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 import numpy as np
 
-from detection.Faster_RCNN.utils.bbox_tools import cal_IoU, cal_offset_scale, map_data2anchor
+from detection.Faster_RCNN.utils._bbox_tools import cal_IoU, cal_offset_scale, map_data2anchor
 from detection.Faster_RCNN.utils.config import cfg
 
 
@@ -38,7 +38,7 @@ class AnchorTargetLayer(nn.Module):
 
     def _create_label(self, anchors, gt_bbox):
         # 给符合条件的anchor打上标签，前景为1，后景为0，-1是默认值
-        label = torch.zeros(len(anchors), dtype=torch.int32,device = self.device)
+        label = torch.zeros(len(anchors), dtype=torch.int32, device=self.device)
         label.fill_(-1)  # 全部填充为默认值
         argmax_iou, per_anchor_max_iou, max_iou_anchor_idx = self._cal_iou(anchors, gt_bbox)
         # 填充负样本
@@ -50,14 +50,13 @@ class AnchorTargetLayer(nn.Module):
         def remove_redundant_label(label, expect_num, target_label):
             # 去除掉多余的标签
             idx = torch.where(label == target_label)[0].float()  # 获取多余标签的索引
-            print("idx: ", torch.sum(label[idx.long()] == 1))
             # 判断数量
             if len(idx) > expect_num.item():
                 # 随机抽取一些去掉
                 num_sample = len(idx) - expect_num
                 if torch.is_tensor(num_sample):
                     num_sample = num_sample.item()
-                remove_idx_idx = torch.multinomial(idx, num_sample)
+                remove_idx_idx = torch.multinomial(idx, int(num_sample))
                 remove_idx = idx[remove_idx_idx].long()
                 label[remove_idx] = -1
 
@@ -70,12 +69,7 @@ class AnchorTargetLayer(nn.Module):
         # 去掉多余的负样本
         negative_num = self.n_sample - torch.sum(label == 1)
         label = remove_redundant_label(label, negative_num, 0)
-        num_pos = torch.sum(label == 1)
-        num_neg = torch.sum(label == 0)
-        num_None = torch.sum(label == -1)
 
-        print("正样本数：", num_pos)
-        print("负样本数：", num_neg)
         return argmax_iou, label
 
     def _cal_iou(self, anchors, gt_bbox):
@@ -125,7 +119,7 @@ class ProposalTargetLayer(nn.Module):
             roi_idx = roi_idx
             if sample_num < len(roi_idx):
                 # 从positive_roi_idx中选择positive_num个正样本
-                roi_idx_idx = torch.multinomial(roi_idx, sample_num)
+                roi_idx_idx = torch.multinomial(roi_idx, int(sample_num))
                 roi_idx = roi_idx[roi_idx_idx]
             return roi_idx.long()
 

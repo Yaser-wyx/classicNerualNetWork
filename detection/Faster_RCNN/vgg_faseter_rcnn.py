@@ -1,6 +1,7 @@
 from detection.Faster_RCNN.faster_rcnn import FasterRCNN
+from detection.Faster_RCNN.region_proposal_network import RegionProposalNetwork
 from detection.Faster_RCNN.roi import VGGRoIHead
-from detection.Faster_RCNN.rpn import RegionProposalNetWork
+from detection.Faster_RCNN._rpn import RegionProposalNetWork
 from detection.Faster_RCNN.utils.config import cfg
 from detection.Faster_RCNN.utils.model_helper import init_VGG16
 
@@ -20,9 +21,7 @@ class VGGFasterRCNN(FasterRCNN):
 
         extractor, classifier = init_VGG16(pretrain, pretrain_model_path)
 
-
-        rpn = RegionProposalNetWork(in_channels=rpn_in_channel, mid_channels=rpn_mid_channel, anchor_ratios=ratios,
-                                    anchor_scales=anchor_scales, feat_stride=feat_stride)
+        rpn = RegionProposalNetWork()
 
         roi_head = VGGRoIHead(n_classes=n_classes + 1, roi_size=roi_size, spatial_scale=1. / feat_stride,
                               classifier=classifier)
